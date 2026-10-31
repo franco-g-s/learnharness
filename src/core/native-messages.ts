@@ -78,7 +78,8 @@ export interface LhMarkerMessage {
 		| "practice-next"
 		| "problem-dismissed"
 		| "compaction"
-		| "side-question";
+		| "side-question"
+		| "side-question-told";
 	/** The model-facing text ("" for plan blocks — UI-only). */
 	content: string;
 	display: boolean;
@@ -125,7 +126,9 @@ export function asAgentMessages(messages: readonly LhMessage[]): AgentMessage[] 
  *  means: a closed side thread leaves a dismissal pause, a Retry, a
  *  recovery, or an owed continuation exactly as it found them. */
 export function isSideQuestionMarker(m: LhMessage | AgentMessage | undefined): boolean {
-	return (m as { role?: string } | undefined)?.role === "custom" && (m as LhMarkerMessage).customType === "side-question";
+	if ((m as { role?: string } | undefined)?.role !== "custom") return false;
+	const type = (m as LhMarkerMessage).customType;
+	return type === "side-question" || type === "side-question-told";
 }
 
 function tailIgnoringSideQuestions<T>(messages: readonly T[]): readonly T[] {
@@ -873,7 +876,7 @@ export function nativeInputCause(message: AgentMessage, history: readonly AgentM
 	if (message.role === "custom") {
 		if (["probe-handoff", "subagent-steer", "subagent-abort"].includes(message.customType)) return "automatic";
 		if (["practice-thinking", "practice-next"].includes(message.customType)) return "learner";
-		return ["graph-context", "plan-block", "problem-dismissed", "compaction", "side-question"].includes(message.customType) ? "neutral" : "unrecognizable";
+		return ["graph-context", "plan-block", "problem-dismissed", "compaction", "side-question", "side-question-told"].includes(message.customType) ? "neutral" : "unrecognizable";
 	}
 	if (message.role === "toolResult") {
 		if (message.isError && (message.details as { questionRecovery?: unknown } | null)?.questionRecovery === true) {

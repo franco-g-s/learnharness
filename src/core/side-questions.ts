@@ -258,6 +258,21 @@ export function sideUserMessage(
 
 // ─── the record marker ───────────────────────────────────────────────────────
 
+/** "Tell tutor" after close: a thread kept private can still be told. The
+ *  note lands at the record's end (the tutor may have read past the
+ *  original marker); the view folds it into the original chip. */
+export function newSideQuestionToldMarker(threadId: string, note: string): LhMarkerMessage {
+	return {
+		id: `${threadId}_told`,
+		role: "custom",
+		customType: "side-question-told",
+		content: note,
+		display: false,
+		details: { threadId },
+		timestamp: Date.now(),
+	};
+}
+
 /** The closed thread's marker. The thread id is its record id, so the
  *  side answers' usage entries (messageId = threadId) fold onto its chip. */
 export function newSideQuestionMarker(threadId: string, details: SideQuestionDetails): LhMarkerMessage {

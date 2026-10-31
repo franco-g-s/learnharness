@@ -18,7 +18,7 @@ import { endsInFailedTurn, failedResponseAtEnd, retryDrops } from "../src/core/i
 import { compactionCutIndex, serializeForSummary } from "../src/core/compaction.ts";
 import { projectView } from "../src/core/view.ts";
 import { dismissedAnswer } from "../src/core/question-core.ts";
-import { newSideQuestionMarker, sideTranscript } from "../src/core/side-questions.ts";
+import { newSideQuestionMarker, newSideQuestionToldMarker, sideTranscript } from "../src/core/side-questions.ts";
 
 const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 function assistant(id: string, content: AssistantMessage["content"], stopReason: AssistantMessage["stopReason"] = "toolUse", errorMessage?: string): LhMessage {
@@ -91,5 +91,30 @@ describe("the side-question view", () => {
 		assert.equal(last.id, "side_told");
 		assert.equal(last.role, "user");
 		assert.deepEqual(last.parts, [{ type: "data-side-question", id: "sq_side_told", data: details(true) }]);
+	});
+});
+
+describe("telling the tutor later (side-question-told)", () => {
+	const toldLater = () => newSideQuestionToldMarker("side_quiet", "Already clarified in a side question: why.") as LhMessage;
+	it("carries the note to the tutor at its own position", () => {
+		const m = toldLater();
+		assert.equal(m.id, "side_quiet_told");
+		const wire = toLlmMessages(asAgentMessages([newUserMessage("hi") as LhMessage, quiet(), toldLater()]));
+		assert.equal(wire.length, 2);
+		assert.deepEqual(wire[1]!.content, [{ type: "text", text: "Already clarified in a side question: why." }]);
+		assert.match(sideTranscript([quiet(), toldLater()]), /\[NOTE\] Already clarified/);
+	});
+	it("is neutral and transparent at the tail", () => {
+		assert.equal(nativeInputCause(asAgentMessages([toldLater()])[0]!, []), "neutral");
+		assert.equal(isSideQuestionMarker(toldLater()), true);
+		assert.equal(endsInDismissal([...dismissedTail(), quiet(), toldLater()]), true);
+		assert.equal(needsContinuation([...answeredBatch(), toldLater()]), true);
+		assert.equal(endsInFailedTurn([...failure(), toldLater()]), true);
+		assert.deepEqual([...retryDrops([...failure(), toldLater()])], ["a_fail"]);
+	});
+	it("renders nothing itself and marks the original chip as told", () => {
+		const view = projectView([newUserMessage("hi") as LhMessage, quiet(), toldLater()]);
+		assert.equal(view.length, 2);
+		assert.deepEqual(view[1]!.parts, [{ type: "data-side-question", id: "sq_side_quiet", data: { ...details(false), toldTutor: true } }]);
 	});
 });

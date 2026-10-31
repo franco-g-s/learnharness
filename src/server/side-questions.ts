@@ -28,6 +28,7 @@ import { resolveSideQuestionSpec, type EffectiveModelSpec } from "../core/settin
 import {
 	finalTell,
 	newSideQuestionMarker,
+	newSideQuestionToldMarker,
 	parseSideCloseInput,
 	parseSideQuestionInput,
 	sideTranscript,
@@ -35,6 +36,7 @@ import {
 	type SideCloseInput,
 	type SideNote,
 	type SidePair,
+	type SideQuestionDetails,
 	type SideQuestionInput,
 } from "../core/side-questions.ts";
 import { awaitCompaction } from "./compaction.ts";
@@ -326,5 +328,33 @@ export async function handleSideClose(chatId: string, body: unknown): Promise<Re
 	// An unanswered question with no run behind it is dropped.
 	const outcome = commitThread(chatId, input, input.thread);
 	if (outcome === null) return new Response(null, { status: 204 });
+	return outcome === "parked" ? Response.json({ ok: true, parked: true }, { status: 202 }) : Response.json({ ok: true });
+}
+
+// ─── tell the tutor later (Addendum 2026-10-31) ─────────────────────────────
+
+/**
+ * POST /api/chats/[id]/side-question/tell — a thread kept private is told
+ * after all: its saved note lands at the record's end as a
+ * side-question-told marker, parked like a close. 200 told (or already
+ * told), 202 parked, 404 unknown thread, 409 still saving.
+ */
+export async function handleSideTell(chatId: string, body: unknown): Promise<Response> {
+	const record = stores.chatStore.getChat(chatId);
+	if (!record) return Response.json({ error: "Unknown chat" }, { status: 404 });
+	const threadId = (body as { threadId?: unknown } | null)?.threadId;
+	if (typeof threadId !== "string" || !threadId) return Response.json({ error: "threadId must be a non-empty string" }, { status: 400 });
+	if (closing().has(`${chatId}\u0000${threadId}`)) return Response.json({ error: "The side thread is still being saved" }, { status: 409 });
+
+	const known = [...record.messages, ...(parked().get(chatId) ?? [])];
+	const thread = known.find((m) => m.id === threadId && m.role === "custom" && m.customType === "side-question") as LhMarkerMessage | undefined;
+	if (!thread) return Response.json({ error: "Unknown side thread" }, { status: 404 });
+	const details = thread.details as SideQuestionDetails;
+	const toldId = `${threadId}_told`;
+	if (details.toldTutor || known.some((m) => m.id === toldId)) return Response.json({ ok: true });
+
+	await awaitCompaction(chatId);
+	if (sideQuestionKnown(stores.chatStore, chatId, toldId)) return Response.json({ ok: true });
+	const outcome = commitSideQuestion(stores.chatStore, chatId, newSideQuestionToldMarker(threadId, details.note));
 	return outcome === "parked" ? Response.json({ ok: true, parked: true }, { status: 202 }) : Response.json({ ok: true });
 }
