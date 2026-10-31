@@ -1852,6 +1852,7 @@ export function Chat({
 					<SideThreadPanel>
 						<SideThreadBody
 							state={sideThread.state}
+							chatId={chatId}
 							onAsk={sideThread.ask}
 							onSetTell={sideThread.setTell}
 							onExpand={sideThread.expand}
@@ -1880,6 +1881,7 @@ export function Chat({
 				{sideThread.state?.mode === "popover" && (
 					<SideThreadPopover
 						state={sideThread.state}
+						chatId={chatId}
 						composer={() => composerInputRef.current}
 						onAsk={sideThread.ask}
 						onSetTell={sideThread.setTell}

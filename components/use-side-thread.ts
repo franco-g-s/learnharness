@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import {
 	SIDE_THREAD_MAX_PAIRS,
+	type PassageSelector,
 	type SideNote,
 	type SidePair,
 	type SideQuestionDetails,
@@ -21,10 +22,18 @@ import { sseEvents } from "./session-core";
  *  a closed thread reopens from, or just above the composer (/btw). */
 export type SideThreadAnchor = { kind: "range"; range: Range } | { kind: "element"; element: HTMLElement } | { kind: "composer" };
 
+/** A quoted tutor passage and where it sits (its quote links back there). */
+export interface SidePassage {
+	text: string;
+	sourceMessageId: string;
+	selector?: PassageSelector;
+}
+
 export interface SideDraft {
 	question: string;
 	passage?: string;
 	sourceMessageId?: string;
+	selector?: PassageSelector;
 	answer: string;
 	/** The file tool running now ("read notes.md"). */
 	activity?: string;
@@ -36,7 +45,7 @@ export interface SideThreadState {
 	/** The question being answered now (one at a time). */
 	draft: SideDraft | null;
 	/** The passage the next question quotes. */
-	pendingPassage?: { text: string; sourceMessageId: string };
+	pendingPassage?: SidePassage;
 	/** The learner's last hand-set toggle; null = never flipped (F10). */
 	learnerTell: boolean | null;
 	mode: "popover" | "panel";
@@ -48,10 +57,10 @@ export interface SideThreadState {
 }
 
 export type SideThreadAction =
-	| { type: "open"; threadId: string; anchor: SideThreadAnchor; passage?: { text: string; sourceMessageId: string } }
+	| { type: "open"; threadId: string; anchor: SideThreadAnchor; passage?: SidePassage }
 	| { type: "open-read-only"; threadId: string; details: SideQuestionDetails; anchor: SideThreadAnchor }
 	| { type: "told"; threadId: string }
-	| { type: "add-passage"; passage: { text: string; sourceMessageId: string } }
+	| { type: "add-passage"; passage: SidePassage }
 	| { type: "ask"; question: string }
 	| { type: "text"; delta: string }
 	| { type: "tool"; name: string; label: string }
@@ -98,7 +107,11 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 				draft: {
 					question,
 					answer: "",
-					...(pendingPassage ? { passage: pendingPassage.text, sourceMessageId: pendingPassage.sourceMessageId } : {}),
+					...(pendingPassage ? {
+						passage: pendingPassage.text,
+						sourceMessageId: pendingPassage.sourceMessageId,
+						...(pendingPassage.selector ? { selector: pendingPassage.selector } : {}),
+					} : {}),
 				},
 			};
 		}
@@ -116,12 +129,12 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 		}
 		case "error": {
 			if (!state.draft) return state;
-			const { question, passage, sourceMessageId } = state.draft;
+			const { question, passage, sourceMessageId, selector } = state.draft;
 			return {
 				...state,
 				draft: null,
 				failed: { question, error: action.error },
-				...(passage && sourceMessageId ? { pendingPassage: { text: passage, sourceMessageId } } : {}),
+				...(passage && sourceMessageId ? { pendingPassage: { text: passage, sourceMessageId, ...(selector ? { selector } : {}) } } : {}),
 			};
 		}
 	}
@@ -145,6 +158,7 @@ export function sideCloseBody(state: SideThreadState) {
 				question: state.draft.question,
 				...(state.draft.passage !== undefined ? { passage: state.draft.passage } : {}),
 				...(state.draft.sourceMessageId !== undefined ? { sourceMessageId: state.draft.sourceMessageId } : {}),
+				...(state.draft.selector !== undefined ? { selector: state.draft.selector } : {}),
 			},
 		} : {}),
 	};
@@ -167,7 +181,7 @@ function postClose(chatId: string, state: SideThreadState): void {
 
 export interface SideThreadOpenArgs {
 	anchor: SideThreadAnchor;
-	passage?: { text: string; sourceMessageId: string };
+	passage?: SidePassage;
 	question?: string;
 }
 
@@ -218,6 +232,7 @@ export function useSideThread(chatId: string) {
 						question: draft.question,
 						...(draft.passage !== undefined ? { passage: draft.passage } : {}),
 						...(draft.sourceMessageId !== undefined ? { sourceMessageId: draft.sourceMessageId } : {}),
+						...(draft.selector !== undefined ? { selector: draft.selector } : {}),
 						// F10: the next note rewrites this one to cover the whole thread.
 						...(current.pairs.length ? { note: current.pairs[current.pairs.length - 1]!.note } : {}),
 					}),
@@ -258,7 +273,7 @@ export function useSideThread(chatId: string) {
 		apply(action);
 	}, [apply, close]);
 
-	const addPassage = useCallback((passage: { text: string; sourceMessageId: string }) => apply({ type: "add-passage", passage }), [apply]);
+	const addPassage = useCallback((passage: SidePassage) => apply({ type: "add-passage", passage }), [apply]);
 	const setTell = useCallback((tell: boolean) => apply({ type: "set-tell", tell }), [apply]);
 	const expand = useCallback(() => apply({ type: "expand" }), [apply]);
 	/** "Tell tutor" on a closed thread (its chip or its read-only reopen). */

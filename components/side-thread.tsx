@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { GripVertical, MessageCirclePlus, MessageCircleQuestion, PanelRightOpen, TextQuote, X } from "lucide-react";
-import { SIDE_PASSAGE_MAX_CHARS, SIDE_THREAD_MAX_PAIRS } from "@/src/core";
+import { SIDE_PASSAGE_MAX_CHARS, SIDE_THREAD_MAX_PAIRS, type PassageSelector, type TutorCitation } from "@/src/core";
+import { CitationActionsContext } from "./citation-chip";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
@@ -12,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { clampDragged, placeSideThread, resizedHeight, type SideThreadPlacement } from "./side-thread-float";
 import type { CapturedSelection } from "./selection-text";
 import type { SelectionAction } from "./selection-toolbar";
-import { displayedTell, type SideThreadAnchor, type SideThreadOpenArgs, type SideThreadState } from "./use-side-thread";
+import { displayedTell, type SidePassage, type SideThreadAnchor, type SideThreadOpenArgs, type SideThreadState } from "./use-side-thread";
 
 /** `/btw <question>` in the composer (teaching sessions): the question, or
  *  "" for a bare `/btw`; null when the text is not the command. */
@@ -26,9 +27,12 @@ export function parseBtw(text: string): { question: string } | null {
 export function createSideQuestionActions({ threadOpen, open, addPassage }: {
 	threadOpen: () => boolean;
 	open: (args: SideThreadOpenArgs) => void;
-	addPassage: (passage: { text: string; sourceMessageId: string }) => void;
+	addPassage: (passage: SidePassage) => void;
 }): SelectionAction[] {
-	const passageOf = (capture: CapturedSelection) => ({ text: capture.selector.text, sourceMessageId: capture.messageId });
+	const passageOf = (capture: CapturedSelection): SidePassage => {
+		const { text, start, end, prefix, suffix } = capture.selector;
+		return { text, sourceMessageId: capture.messageId, selector: { start, end, prefix, suffix } };
+	};
 	const tooLong = (capture: CapturedSelection) => (capture.selector.text.length > SIDE_PASSAGE_MAX_CHARS ? "Shorten selection" : null);
 	const openFrom = (capture: CapturedSelection) => {
 		open({ anchor: { kind: "range", range: capture.range.cloneRange() }, passage: passageOf(capture) });
@@ -110,18 +114,36 @@ function SideNoteBlock({ state, onSetTell, onTellTutor }: { state: SideThreadSta
 	);
 }
 
-function Passage({ text }: { text: string }) {
+/** A quoted tutor passage. With its source message it is a link: clicking
+ *  jumps to the tutor text and highlights it (Cite's reveal). Without a
+ *  selector (threads saved before quotes kept one) the text alone finds
+ *  it when it occurs once; otherwise the reveal lands on the message. */
+function Passage({ text, chatId, sourceMessageId, selector }: { text: string; chatId?: string; sourceMessageId?: string; selector?: PassageSelector }) {
+	const actions = useContext(CitationActionsContext);
+	const quote = <blockquote className="line-clamp-4 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">{text}</blockquote>;
+	if (!chatId || !sourceMessageId || !actions?.openSource) return quote;
+	const at = selector ?? { start: 0, end: text.length, prefix: "", suffix: "" };
+	const citation: TutorCitation = { version: 1, chatId, messageId: sourceMessageId, text, ...at };
 	return (
-		<blockquote className="line-clamp-4 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">
-			{text}
-		</blockquote>
+		<button
+			type="button"
+			data-testid="side-passage-link"
+			aria-label="Show the quoted tutor text"
+			title="Show in the lesson"
+			className="cursor-pointer rounded-sm text-left hover:bg-accent/50 [&_blockquote]:hover:border-foreground/40"
+			onClick={(event) => actions.openSource!(citation, event.currentTarget)}
+		>
+			{quote}
+		</button>
 	);
 }
 
 /** The thread itself: header, Q&A pairs, the note with its toggle, the
  *  follow-up input. Shared by the popover and the panel. */
-export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose, onTellTutor, onDragStart }: {
+export function SideThreadBody({ state, chatId, onAsk, onSetTell, onExpand, onClose, onTellTutor, onDragStart }: {
 	state: SideThreadState;
+	/** The lesson's chat: quotes link back into it. */
+	chatId?: string;
 	/** The popover's header is its drag handle. */
 	onDragStart?: (event: React.PointerEvent<HTMLElement>) => void;
 } & SideThreadHandlers) {
@@ -164,14 +186,14 @@ export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose, onT
 			<div data-side-scroll="" className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto font-prose">
 				{state.pairs.map((pair, i) => (
 					<div key={i} className="flex flex-col gap-1.5" data-testid="side-pair">
-						{pair.passage && <Passage text={pair.passage} />}
+						{pair.passage && <Passage text={pair.passage} chatId={chatId} sourceMessageId={pair.sourceMessageId} selector={pair.selector} />}
 						<p className="text-sm font-medium">{pair.question}</p>
 						<div className="text-sm"><MessageResponse>{pair.answer}</MessageResponse></div>
 					</div>
 				))}
 				{state.draft && (
 					<div className="flex flex-col gap-1.5" data-testid="side-draft">
-						{state.draft.passage && <Passage text={state.draft.passage} />}
+						{state.draft.passage && <Passage text={state.draft.passage} chatId={chatId} sourceMessageId={state.draft.sourceMessageId} selector={state.draft.selector} />}
 						<p className="text-sm font-medium">{state.draft.question}</p>
 						{state.draft.answer ? (
 							<div className="text-sm"><MessageResponse>{state.draft.answer}</MessageResponse></div>
@@ -191,7 +213,7 @@ export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose, onT
 
 			{!readOnly && (
 				<div className="flex flex-col gap-1.5 font-prose">
-					{state.pendingPassage && <Passage text={state.pendingPassage.text} />}
+					{state.pendingPassage && <Passage text={state.pendingPassage.text} chatId={chatId} sourceMessageId={state.pendingPassage.sourceMessageId} selector={state.pendingPassage.selector} />}
 					<Textarea
 						ref={inputRef}
 						aria-label="Side question"
@@ -237,7 +259,7 @@ function anchorRect(anchor: SideThreadAnchor, composer: () => HTMLElement | null
  *  composer at its width (/btw). It follows its anchor and its own growth
  *  until the learner moves it (header) or resizes it (bottom edge); from
  *  then on it keeps that frame, and longer content scrolls inside. */
-export function SideThreadPopover({ state, composer, ...handlers }: { state: SideThreadState; composer: () => HTMLElement | null } & SideThreadHandlers) {
+export function SideThreadPopover({ state, chatId, composer, ...handlers }: { state: SideThreadState; chatId: string; composer: () => HTMLElement | null } & SideThreadHandlers) {
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [placement, setPlacement] = useState<SideThreadPlacement | null>(null);
 	const [frame, setFrame] = useState<{ x: number; y: number; height: number } | null>(null);
@@ -361,7 +383,7 @@ export function SideThreadPopover({ state, composer, ...handlers }: { state: Sid
 			// the popover stays clickable and draggable itself.
 			className="lh-no-drag flex flex-col overflow-hidden rounded-xl border bg-popover p-3 text-sm shadow-xl"
 		>
-			<SideThreadBody state={state} {...handlers} onDragStart={startDrag} />
+			<SideThreadBody state={state} chatId={chatId} {...handlers} onDragStart={startDrag} />
 			<div
 				aria-hidden="true"
 				data-testid="side-thread-resize"

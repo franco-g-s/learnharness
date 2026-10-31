@@ -43,6 +43,13 @@ describe("sideThreadReducer", () => {
 		assert.equal(retried.draft?.passage, passage.text);
 	});
 
+	it("carries a passage's selector into the question and the close body", () => {
+		const selector = { start: 0, end: 5, prefix: "", suffix: " x" };
+		const s = run(open, { type: "add-passage", passage: { ...passage, selector } }, { type: "ask", question: "q" })!;
+		assert.deepEqual(s.draft?.selector, selector);
+		assert.deepEqual(sideCloseBody(s).pending, { question: "q", passage: passage.text, sourceMessageId: "msg_1", selector });
+	});
+
 	it("attaches an added passage to the next question only", () => {
 		const s = run(open, { type: "ask", question: "a" }, { type: "note", tell: false, note: "n" }, { type: "add-passage", passage }, { type: "ask", question: "b" })!;
 		assert.deepEqual(s.draft, { question: "b", answer: "", passage: passage.text, sourceMessageId: "msg_1" });

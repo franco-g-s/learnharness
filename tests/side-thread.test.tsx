@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { noteStatus, parseBtw, SideThreadBody, sideThreadPlaceholder, createSideQuestionActions } from "../components/side-thread.tsx";
 import type { SideThreadState } from "../components/use-side-thread.ts";
+import { CitationActionsContext } from "../components/citation-chip.tsx";
 
 const noop = () => {};
 const handlers = { onAsk: noop, onSetTell: noop, onExpand: noop, onClose: noop };
@@ -65,6 +66,20 @@ describe("SideThreadBody", () => {
 		const html = (drag: boolean) => parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={answered} {...handlers} {...(drag ? { onDragStart: noop } : {})} />)}</body></html>`).document;
 		assert.match(html(true).querySelector('[data-testid="side-thread-header"]')!.getAttribute("class")!, /cursor-grab/);
 		assert.doesNotMatch(html(false).querySelector('[data-testid="side-thread-header"]')!.getAttribute("class")!, /cursor-grab/);
+	});
+
+	it("links a quote back to the tutor text when its source is known", () => {
+		const selector = { start: 4, end: 28, prefix: "and ", suffix: " here" };
+		const linked = { ...answered, pairs: [{ ...answered.pairs[0]!, sourceMessageId: "msg_1", selector }] };
+		const html = (state: SideThreadState) => parseHTML(`<html><body>${renderToStaticMarkup(
+			<CitationActionsContext.Provider value={{ openSource: noop }}>
+				<SideThreadBody state={state} chatId="chat_1" {...handlers} />
+			</CitationActionsContext.Provider>,
+		)}</body></html>`).document;
+		assert.match(html(linked).querySelector('[data-testid="side-passage-link"]')!.textContent!, /the derivatives multiply/);
+		const textOnly = { ...answered, pairs: [{ ...answered.pairs[0]!, sourceMessageId: "msg_1" }] };
+		assert.ok(html(textOnly).querySelector('[data-testid="side-passage-link"]'), "older threads link by text");
+		assert.equal(html(answered).querySelector('[data-testid="side-passage-link"]'), null, "no source message, plain quote");
 	});
 
 	it("shows the answer streaming in", () => {

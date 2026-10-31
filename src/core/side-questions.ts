@@ -12,6 +12,7 @@
  */
 
 import type { Message } from "@earendil-works/pi-ai";
+import { CITATION_CONTEXT_LENGTH } from "./citations.ts";
 import { COMPACTED_HISTORY_HEADER } from "./contracts/chat.ts";
 import { ChatInputError } from "./input-events.ts";
 import {
@@ -40,6 +41,16 @@ export interface SidePair {
 	answer: string;
 	passage?: string;
 	sourceMessageId?: string;
+	/** Where the passage sits in its tutor message (Cite's text selector,
+	 *  minus the text), so the quote links back to it. */
+	selector?: PassageSelector;
+}
+
+export interface PassageSelector {
+	start: number;
+	end: number;
+	prefix: string;
+	suffix: string;
 }
 
 /** The side agent's recommendation and draft note for the tutor. */
@@ -56,6 +67,7 @@ export interface SideQuestionInput {
 	question: string;
 	passage?: string;
 	sourceMessageId?: string;
+	selector?: PassageSelector;
 	/** The agent's newest note, which the next one rewrites to cover the
 	 *  whole thread (F10). */
 	note?: string;
@@ -68,7 +80,7 @@ export interface SideCloseInput {
 	threadId: string;
 	thread: Array<SidePair & SideNote>;
 	learnerTell: boolean | null;
-	pending?: { question: string; passage?: string; sourceMessageId?: string };
+	pending?: { question: string; passage?: string; sourceMessageId?: string; selector?: PassageSelector };
 }
 
 /** The marker's UI payload (never model-visible). */
@@ -97,9 +109,19 @@ function questionOf(v: unknown, field: string): string {
 	return v;
 }
 
-/** The optional passage + source id, copied only when present. */
-function passageOf(raw: Record<string, unknown>, field: string): { passage?: string; sourceMessageId?: string } {
-	const out: { passage?: string; sourceMessageId?: string } = {};
+function selectorOf(raw: unknown, field: string): PassageSelector {
+	const s = raw as Partial<Record<keyof PassageSelector, unknown>>;
+	const index = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v >= 0;
+	const context = (v: unknown) => typeof v === "string" && v.length <= CITATION_CONTEXT_LENGTH;
+	if (!isObject(raw) || !index(s.start) || !index(s.end) || (s.end as number) <= (s.start as number) || !context(s.prefix) || !context(s.suffix)) {
+		throw new ChatInputError(`${field}.selector must be { start, end, prefix, suffix } with end > start`);
+	}
+	return { start: s.start as number, end: s.end as number, prefix: s.prefix as string, suffix: s.suffix as string };
+}
+
+/** The optional passage, its source id and selector, copied only when present. */
+function passageOf(raw: Record<string, unknown>, field: string): { passage?: string; sourceMessageId?: string; selector?: PassageSelector } {
+	const out: { passage?: string; sourceMessageId?: string; selector?: PassageSelector } = {};
 	if (raw.passage !== undefined) {
 		if (typeof raw.passage !== "string" || !raw.passage.trim()) throw new ChatInputError(`${field}.passage must be non-empty text`);
 		if (raw.passage.length > SIDE_PASSAGE_MAX_CHARS) throw new ChatInputError(`${field}.passage is longer than ${SIDE_PASSAGE_MAX_CHARS} characters`);
@@ -108,6 +130,10 @@ function passageOf(raw: Record<string, unknown>, field: string): { passage?: str
 	if (raw.sourceMessageId !== undefined) {
 		if (typeof raw.sourceMessageId !== "string" || !raw.sourceMessageId) throw new ChatInputError(`${field}.sourceMessageId must be a string`);
 		out.sourceMessageId = raw.sourceMessageId;
+	}
+	if (raw.selector !== undefined) {
+		if (out.passage === undefined) throw new ChatInputError(`${field}.selector needs a passage`);
+		out.selector = selectorOf(raw.selector, field);
 	}
 	return out;
 }

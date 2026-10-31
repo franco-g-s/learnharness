@@ -115,6 +115,13 @@ describe("POST /api/chats/[id]/side-question", () => {
 		assert.match(s.prompts[0]!, /AFTER-COMPACTION/);
 	});
 
+	it("keeps the passage's selector on the answered pair", async () => {
+		const selector = { start: 4, end: 28, prefix: "and ", suffix: " here" };
+		const res = await handleSideQuestion(chat(), body("thread_selector", { passage: "the derivatives multiply", sourceMessageId: "m1", selector }), scripted(answered()));
+		await res.text();
+		assert.deepEqual((await inFlightSideAnswer("thread_selector")!.answer)?.selector, selector);
+	});
+
 	it("keeps answering after the client disconnects", async () => {
 		const id = chat();
 		const res = await handleSideQuestion(id, body("thread_gone"), scripted(answered()));

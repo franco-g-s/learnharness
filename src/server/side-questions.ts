@@ -180,6 +180,7 @@ export async function handleSideQuestion(chatId: string, body: unknown, deps: Si
 				answer: result.answer,
 				...(input.passage !== undefined ? { passage: input.passage } : {}),
 				...(input.sourceMessageId !== undefined ? { sourceMessageId: input.sourceMessageId } : {}),
+				...(input.selector !== undefined ? { selector: input.selector } : {}),
 				...note,
 			};
 		} catch (err) {

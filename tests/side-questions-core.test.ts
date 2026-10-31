@@ -39,6 +39,9 @@ describe("parseSideQuestionInput", () => {
 		assert.deepEqual(parseSideQuestionInput(ok), ok);
 		assert.deepEqual(parseSideQuestionInput({ ...ok, passage: "p", sourceMessageId: "m1" }), { ...ok, passage: "p", sourceMessageId: "m1" });
 		assert.deepEqual(parseSideQuestionInput({ ...ok, note: "last note" }), { ...ok, note: "last note" });
+		const selector = { start: 4, end: 28, prefix: "and ", suffix: " here" };
+		assert.deepEqual(parseSideQuestionInput({ ...ok, passage: "p", sourceMessageId: "m1", selector }), { ...ok, passage: "p", sourceMessageId: "m1", selector });
+		assert.deepEqual(parseSideQuestionInput({ ...ok, thread: [{ question: "q", answer: "a", passage: "p", sourceMessageId: "m1", selector }] }).thread[0]!.selector, selector);
 	});
 	it("rejects bad shapes and the caps with ChatInputError", () => {
 		const bad: unknown[] = [
@@ -46,6 +49,10 @@ describe("parseSideQuestionInput", () => {
 			{ ...ok, question: "q".repeat(SIDE_QUESTION_MAX_CHARS + 1) },
 			{ ...ok, passage: "p".repeat(SIDE_PASSAGE_MAX_CHARS + 1) },
 			{ ...ok, thread: "no" }, { ...ok, thread: [{ question: "q" }] }, { ...ok, note: 3 }, { ...ok, note: "n".repeat(2_601) },
+			{ ...ok, passage: "p", selector: { start: 5, end: 2, prefix: "", suffix: "" } },
+			{ ...ok, passage: "p", selector: { start: 0, end: 2, prefix: "x".repeat(33), suffix: "" } },
+			{ ...ok, passage: "p", selector: { start: 0.5, end: 2, prefix: "", suffix: "" } },
+			{ ...ok, selector: { start: 0, end: 2, prefix: "", suffix: "" } },
 			{ ...ok, thread: Array.from({ length: SIDE_THREAD_MAX_PAIRS }, () => ({ question: "q", answer: "a" })) },
 		];
 		for (const body of bad) assert.throws(() => parseSideQuestionInput(body), ChatInputError, JSON.stringify(body)?.slice(0, 80));
