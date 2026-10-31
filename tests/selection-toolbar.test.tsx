@@ -28,6 +28,16 @@ describe("SelectionToolbarButtons", () => {
 	});
 });
 
+describe("toolbar button surface", () => {
+	it("is opaque in dark mode too (the outline variant's dark fill is translucent)", () => {
+		const document = documentFor(<SelectionToolbarButtons capture={capture} actions={[action({})]} onDone={() => {}} />);
+		const classes = document.querySelector("button")!.getAttribute("class")!.split(/\s+/);
+		assert.ok(classes.includes("dark:bg-popover"), classes.join(" "));
+		assert.ok(!classes.includes("dark:bg-input/30"));
+		assert.ok(!classes.includes("dark:hover:bg-input/50"));
+	});
+});
+
 describe("runSelectionAction", () => {
 	it("reports done only when the action handled the selection", () => {
 		assert.equal(runSelectionAction(action({ onSelect: () => true }), capture), true);

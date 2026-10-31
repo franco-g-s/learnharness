@@ -47,7 +47,7 @@ export function SelectionToolbarButtons({ capture, actions, onDone }: {
 						variant="outline"
 						disabled={disabled !== null}
 						aria-label={disabled ?? action.ariaLabel}
-						className="bg-popover shadow-md"
+						className="bg-popover shadow-md dark:bg-popover dark:hover:bg-accent"
 						// Keep the learner's selection alive through the click.
 						onPointerDown={(event) => event.preventDefault()}
 						onClick={() => { if (runSelectionAction(action, capture)) onDone(); }}
