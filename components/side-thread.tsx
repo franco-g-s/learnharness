@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { MessageCirclePlus, MessageCircleQuestion, PanelRightOpen, TextQuote, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { GripVertical, MessageCirclePlus, MessageCircleQuestion, PanelRightOpen, TextQuote, X } from "lucide-react";
 import { SIDE_PASSAGE_MAX_CHARS, SIDE_THREAD_MAX_PAIRS } from "@/src/core";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MenuShell } from "./menu-shell";
+import { clampDragged, placeSideThread, resizedHeight, type SideThreadPlacement } from "./side-thread-float";
 import type { CapturedSelection } from "./selection-text";
 import type { SelectionAction } from "./selection-toolbar";
 import { displayedTell, type SideThreadAnchor, type SideThreadOpenArgs, type SideThreadState } from "./use-side-thread";
@@ -119,7 +120,11 @@ function Passage({ text }: { text: string }) {
 
 /** The thread itself: header, Q&A pairs, the note with its toggle, the
  *  follow-up input. Shared by the popover and the panel. */
-export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose, onTellTutor }: { state: SideThreadState } & SideThreadHandlers) {
+export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose, onTellTutor, onDragStart }: {
+	state: SideThreadState;
+	/** The popover's header is its drag handle. */
+	onDragStart?: (event: React.PointerEvent<HTMLElement>) => void;
+} & SideThreadHandlers) {
 	const [question, setQuestion] = useState(state.failed?.question ?? "");
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const failedQuestion = state.failed?.question;
@@ -138,7 +143,12 @@ export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose, onT
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-3" data-testid="side-thread">
-			<div className="flex items-center gap-1.5">
+			<div
+				className={`flex items-center gap-1.5 ${onDragStart ? "cursor-grab touch-none select-none active:cursor-grabbing" : ""}`}
+				data-testid="side-thread-header"
+				onPointerDown={onDragStart}
+			>
+				{onDragStart && <GripVertical aria-hidden="true" className="-ml-1 size-3.5 text-muted-foreground" />}
 				<MessageCircleQuestion aria-hidden="true" className="size-3.5 text-muted-foreground" />
 				<span className="flex-1 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">Side question</span>
 				{state.mode === "popover" && (
@@ -151,7 +161,7 @@ export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose, onT
 				</Button>
 			</div>
 
-			<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto font-prose">
+			<div data-side-scroll="" className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto font-prose">
 				{state.pairs.map((pair, i) => (
 					<div key={i} className="flex flex-col gap-1.5" data-testid="side-pair">
 						{pair.passage && <Passage text={pair.passage} />}
@@ -218,25 +228,148 @@ function anchorRect(anchor: SideThreadAnchor, composer: () => HTMLElement | null
 		const lines = Array.from(anchor.range.getClientRects()).filter((r) => r.width || r.height);
 		return lines.at(-1) ?? null;
 	}
-	const element = anchor.kind === "element" ? anchor.element : composer();
+	// The composer's visible box: the form's bordered frame.
+	const element = anchor.kind === "element" ? anchor.element : (composer()?.closest('[data-testid="composer"]')?.parentElement ?? composer());
 	return element?.isConnected ? element.getBoundingClientRect() : null;
 }
 
-/** The popover: anchored to the passage, the chip, or above the composer. */
+/** The popover: anchored to the passage, the chip, or right above the
+ *  composer at its width (/btw). It follows its anchor and its own growth
+ *  until the learner moves it (header) or resizes it (bottom edge); from
+ *  then on it keeps that frame, and longer content scrolls inside. */
 export function SideThreadPopover({ state, composer, ...handlers }: { state: SideThreadState; composer: () => HTMLElement | null } & SideThreadHandlers) {
-	const up = state.anchor.kind === "composer";
-	return (
-		<MenuShell
-			testid="side-thread-popover"
-			getAnchorRect={() => anchorRect(state.anchor, composer)}
-			preferredSide={up ? "up" : "down"}
-			align={up ? "left" : "right"}
-			menuClass="flex w-[26rem] max-w-[calc(100vw-1rem)] flex-col rounded-xl border bg-popover p-3 text-sm shadow-xl"
+	const boxRef = useRef<HTMLDivElement>(null);
+	const [placement, setPlacement] = useState<SideThreadPlacement | null>(null);
+	const [frame, setFrame] = useState<{ x: number; y: number; height: number } | null>(null);
+	const frameRef = useRef(frame);
+	frameRef.current = frame;
+	const stateRef = useRef(state);
+	stateRef.current = state;
+
+	useLayoutEffect(() => {
+		let raf = 0;
+		const place = () => {
+			const box = boxRef.current;
+			if (!box || frameRef.current) return;
+			const current = stateRef.current;
+			const rect = anchorRect(current.anchor, composer);
+			if (!rect) return;
+			// Natural height: the body's inner scroll area is capped, so add
+			// back what it hides.
+			const content = box.firstElementChild as HTMLElement | null;
+			const scroller = box.querySelector<HTMLElement>("[data-side-scroll]");
+			const natural = (content?.scrollHeight ?? 0) + (scroller ? scroller.scrollHeight - scroller.clientHeight : 0);
+			setPlacement(placeSideThread({
+				kind: current.anchor.kind === "composer" ? "composer" : "rect",
+				rect,
+				viewport: { width: window.innerWidth, height: window.innerHeight },
+				contentHeight: natural + 26, // the box's padding and border
+			}));
+		};
+		const rePlace = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(place); };
+		place();
+		// The answer streams in: re-place as the content grows (flip, cap).
+		const observer = new MutationObserver(rePlace);
+		if (boxRef.current) observer.observe(boxRef.current, { childList: true, subtree: true, characterData: true });
+		window.addEventListener("scroll", rePlace, true);
+		window.addEventListener("resize", rePlace);
+		return () => {
+			cancelAnimationFrame(raf);
+			observer.disconnect();
+			window.removeEventListener("scroll", rePlace, true);
+			window.removeEventListener("resize", rePlace);
+		};
+	}, [composer]);
+
+	// The first frame renders hidden while it measures, and a hidden input
+	// can't take focus: focus it once the popover is placed.
+	const placed = placement !== null;
+	useEffect(() => {
+		if (placed) boxRef.current?.querySelector<HTMLElement>('[data-testid="side-thread-input"]')?.focus({ preventScroll: true });
+	}, [placed]);
+
+	// Keep a moved popover inside the window when the window shrinks.
+	useEffect(() => {
+		const onResize = () => {
+			const current = frameRef.current;
+			if (!current) return;
+			const viewport = { width: window.innerWidth, height: window.innerHeight };
+			const height = Math.min(current.height, viewport.height - 16);
+			const at = clampDragged(current, { width: boxRef.current?.getBoundingClientRect().width ?? 0, height }, viewport);
+			setFrame({ ...at, height });
+		};
+		window.addEventListener("resize", onResize);
+		return () => window.removeEventListener("resize", onResize);
+	}, []);
+
+	/** Track one pointer gesture from `handle` until it is released. */
+	const track = (event: React.PointerEvent<HTMLElement>, onMove: (e: PointerEvent) => void) => {
+		const handle = event.currentTarget;
+		handle.setPointerCapture(event.pointerId);
+		const end = () => {
+			handle.removeEventListener("pointermove", onMove);
+			handle.removeEventListener("pointerup", end);
+			handle.removeEventListener("pointercancel", end);
+		};
+		handle.addEventListener("pointermove", onMove);
+		handle.addEventListener("pointerup", end);
+		handle.addEventListener("pointercancel", end);
+	};
+
+	// The frame the gesture starts from: the popover as it is on screen now.
+	const currentFrame = () => {
+		const rect = boxRef.current!.getBoundingClientRect();
+		return frameRef.current ?? { x: rect.left, y: rect.top, height: rect.height };
+	};
+
+	const startDrag = (event: React.PointerEvent<HTMLElement>) => {
+		if (event.button !== 0 || (event.target as Element).closest("button") || !boxRef.current) return;
+		event.preventDefault();
+		const start = currentFrame();
+		const width = boxRef.current.getBoundingClientRect().width;
+		const dx = event.clientX - start.x;
+		const dy = event.clientY - start.y;
+		setFrame(start);
+		track(event, (e) => setFrame({
+			...clampDragged({ x: e.clientX - dx, y: e.clientY - dy }, { width, height: start.height }, { width: window.innerWidth, height: window.innerHeight }),
+			height: start.height,
+		}));
+	};
+
+	const startResize = (event: React.PointerEvent<HTMLElement>) => {
+		if (event.button !== 0 || !boxRef.current) return;
+		event.preventDefault();
+		const start = currentFrame();
+		const originY = event.clientY;
+		setFrame(start);
+		track(event, (e) => setFrame({ ...start, height: resizedHeight(start.height, e.clientY - originY, start.y, window.innerHeight) }));
+	};
+
+	const style: React.CSSProperties = frame && placement
+		? { left: frame.x, top: frame.y, width: placement.style.width, height: frame.height }
+		: placement
+			? { ...placement.style, maxHeight: placement.maxHeight }
+			: { left: 0, top: 0, visibility: "hidden" };
+	return createPortal(
+		<div
+			ref={boxRef}
+			role="dialog"
+			aria-label="Side question"
+			data-testid="side-thread-popover"
+			style={{ position: "fixed", zIndex: 60, ...style }}
+			// lh-no-drag: over the desktop window's drag strip (the top bar)
+			// the popover stays clickable and draggable itself.
+			className="lh-no-drag flex flex-col overflow-hidden rounded-xl border bg-popover p-3 text-sm shadow-xl"
 		>
-			<div role="dialog" aria-label="Side question" className="flex min-h-0 flex-col">
-				<SideThreadBody state={state} {...handlers} />
-			</div>
-		</MenuShell>
+			<SideThreadBody state={state} {...handlers} onDragStart={startDrag} />
+			<div
+				aria-hidden="true"
+				data-testid="side-thread-resize"
+				className="absolute inset-x-3 bottom-0 h-2 cursor-ns-resize touch-none"
+				onPointerDown={startResize}
+			/>
+		</div>,
+		document.body,
 	);
 }
 

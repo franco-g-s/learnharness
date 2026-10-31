@@ -61,6 +61,12 @@ describe("SideThreadBody", () => {
 		assert.deepEqual(noteStatus({ ...readOnly, readOnly: { ...readOnly.readOnly, toldTutor: true } }), { text: "Told the tutor" });
 	});
 
+	it("makes the header a drag handle only in the popover", () => {
+		const html = (drag: boolean) => parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={answered} {...handlers} {...(drag ? { onDragStart: noop } : {})} />)}</body></html>`).document;
+		assert.match(html(true).querySelector('[data-testid="side-thread-header"]')!.getAttribute("class")!, /cursor-grab/);
+		assert.doesNotMatch(html(false).querySelector('[data-testid="side-thread-header"]')!.getAttribute("class")!, /cursor-grab/);
+	});
+
 	it("shows the answer streaming in", () => {
 		const document = documentFor({ ...base, draft: { question: "q?", answer: "", activity: "read notes.md" } });
 		assert.match(document.body.textContent!, /read notes\.md/);
