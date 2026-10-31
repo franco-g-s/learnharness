@@ -62,6 +62,8 @@ import { createCiteAction, type CitationEditTarget } from "@/components/citation
 import { CitationActionsContext, type CitationActions } from "@/components/citation-chip";
 import { CitationCommentPopover } from "@/components/citation-comment-popover";
 import { revealCitationSource } from "@/components/citation-source";
+import { createSideQuestionActions, parseBtw, SideThreadBody, SideThreadPanel, SideThreadPopover } from "@/components/side-thread";
+import { useSideThread } from "@/components/use-side-thread";
 import { useRouter } from "next/navigation";
 import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
@@ -385,6 +387,7 @@ export function Chat({
 		const onAbort = () => {
 			const target = escAbortTarget({
 				abortAsk: abortAskRef.current !== null,
+				sideThread: sideThreadOpenRef.current,
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
@@ -392,7 +395,8 @@ export function Chat({
 				problem: activeProblemRef.current !== null,
 				busy: busyRef.current,
 			});
-			if (target === "question") setAbortAsk("question");
+			if (target === "side-thread") closeSideThreadRef.current();
+			else if (target === "question") setAbortAsk("question");
 			else if (target === "problem") setAbortAsk("problem");
 			else if (target === "turn") setAbortAsk("turn");
 			else if (target === "mermaid") setMermaidFocus(null);
@@ -734,7 +738,23 @@ export function Chat({
 		() => createCiteAction({ chatId, composer: () => composerInputRef.current, openEditor: setCitationEdit }),
 		[chatId],
 	);
-	const selectionActions = useMemo(() => [citeAction], [citeAction]);
+	// SIDE QUESTIONS (#16): a side thread asked from a selection or /btw;
+	// teaching sessions only. It commits to the record when it closes.
+	const sideThread = useSideThread(chatId);
+	const sideThreadOpen = sideThread.state !== null && sideThread.state.readOnly === undefined;
+	const sideThreadOpenRef = useRef(false);
+	sideThreadOpenRef.current = sideThread.state !== null;
+	const closeSideThreadRef = useRef(sideThread.close);
+	closeSideThreadRef.current = sideThread.close;
+	const sideOpenForActionsRef = useRef(sideThreadOpen);
+	sideOpenForActionsRef.current = sideThreadOpen;
+	const { open: openSideThread, addPassage: addSidePassage } = sideThread;
+	const sideActions = useMemo(
+		() => (kind === "practice" ? [] : createSideQuestionActions({ threadOpen: () => sideOpenForActionsRef.current, open: openSideThread, addPassage: addSidePassage })),
+		[kind, openSideThread, addSidePassage],
+	);
+	// Rebuilt when a thread opens or closes, so the buttons follow (F7).
+	const selectionActions = useMemo(() => [citeAction, ...sideActions], [citeAction, sideActions, sideThreadOpen]);
 	const router = useRouter();
 	const transcriptElementRef = useRef<HTMLElement | null>(null);
 	transcriptElementRef.current = transcriptElement;
@@ -1278,6 +1298,14 @@ export function Chat({
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
 		if (!t) return;
+		// /btw <question> (#16): a side question, never sent to the tutor —
+		// before both steer and send. Practice sends it as ordinary text.
+		const btw = kind === "practice" ? null : parseBtw(t);
+		if (btw) {
+			applyText("");
+			sideThread.open({ anchor: { kind: "composer" }, question: btw.question });
+			return;
+		}
 		if (busy) {
 			applyText("");
 			void steer(t);
@@ -1810,6 +1838,17 @@ export function Chat({
 					}}
 				/>
 				</Conversation>
+				{sideThread.state?.mode === "panel" && (
+					<SideThreadPanel>
+						<SideThreadBody
+							state={sideThread.state}
+							onAsk={sideThread.ask}
+							onSetTell={sideThread.setTell}
+							onExpand={sideThread.expand}
+							onClose={sideThread.close}
+						/>
+					</SideThreadPanel>
+				)}
 
 				{/* The session-scoped focuses (chrome-melt wave, 2026-09-19): mounted
 				    INSIDE the session area — absolute inset-0 siblings of the scroller,
@@ -1827,6 +1866,16 @@ export function Chat({
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
 				<SelectionToolbar viewport={transcriptElement} actions={selectionActions} />
+				{sideThread.state?.mode === "popover" && (
+					<SideThreadPopover
+						state={sideThread.state}
+						composer={() => composerInputRef.current}
+						onAsk={sideThread.ask}
+						onSetTell={sideThread.setTell}
+						onExpand={sideThread.expand}
+						onClose={sideThread.close}
+					/>
+				)}
 				{citationEdit && (
 					<CitationCommentPopover
 						key={`${citationEdit.start}:${citationEdit.link}`}
@@ -1902,7 +1951,7 @@ export function Chat({
  *  then the session overlays (mermaid paints above plan — later in DOM),
  *  then setup (self-closing — the gate only must not fire), then the
  *  2026-10-02 abort chain proper (question before turn). */
-export type EscAbortTarget = "mermaid" | "plan" | "setup" | "question" | "problem" | "turn" | null;
+export type EscAbortTarget = "side-thread" | "mermaid" | "plan" | "setup" | "question" | "problem" | "turn" | null;
 	/**
  * Does the opening topic still owe its first send? The topic is the
  * server's ?prompt= or the sessionStorage stash. The gate is "no real
@@ -1919,6 +1968,9 @@ export function initialPromptOwed(messages: readonly { role: string }[], prompt:
 
 export function escAbortTarget(s: {
 	abortAsk: boolean;
+	/** An open side thread (#16, F11): Esc closes (and commits) it before
+	 *  anything else on the ladder. */
+	sideThread?: boolean;
 	mermaidFocus: boolean;
 	planOpen: boolean;
 	setupOpen: boolean;
@@ -1932,6 +1984,7 @@ export function escAbortTarget(s: {
 	busy: boolean;
 }): EscAbortTarget {
 	if (s.abortAsk) return null; // the popup's own Esc — claimed by the dialog
+	if (s.sideThread) return "side-thread";
 	if (s.mermaidFocus) return "mermaid";
 	if (s.planOpen) return "plan";
 	if (s.setupOpen) return "setup";

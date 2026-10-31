@@ -17,7 +17,9 @@ import {
 } from "@/src/core";
 import { sseEvents } from "./session-core";
 
-export type SideThreadAnchor = { kind: "rect"; rect: DOMRect } | { kind: "composer" };
+/** Where the popover sits: the selected passage (a live Range), the chip
+ *  a closed thread reopens from, or just above the composer (/btw). */
+export type SideThreadAnchor = { kind: "range"; range: Range } | { kind: "element"; element: HTMLElement } | { kind: "composer" };
 
 export interface SideDraft {
 	question: string;
