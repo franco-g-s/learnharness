@@ -56,6 +56,9 @@ export interface SideQuestionInput {
 	question: string;
 	passage?: string;
 	sourceMessageId?: string;
+	/** The agent's newest note, which the next one rewrites to cover the
+	 *  whole thread (F10). */
+	note?: string;
 }
 
 /** POST /api/chats/[id]/side-question/close. `learnerTell` is the
@@ -136,7 +139,14 @@ export function parseSideQuestionInput(raw: unknown): SideQuestionInput {
 	const threadId = threadIdOf(raw.threadId);
 	// The new question makes one more pair, so a full thread takes no more.
 	const thread = threadOf(raw.thread, SIDE_THREAD_MAX_PAIRS - 1).map(pairOf);
-	return { threadId, thread, question: questionOf(raw.question, "question"), ...passageOf(raw, "body") };
+	const out: SideQuestionInput = { threadId, thread, question: questionOf(raw.question, "question"), ...passageOf(raw, "body") };
+	if (raw.note !== undefined) {
+		if (typeof raw.note !== "string" || raw.note.length > SIDE_NOTE_MAX_CHARS) {
+			throw new ChatInputError(`note must be a string of at most ${SIDE_NOTE_MAX_CHARS} characters`);
+		}
+		out.note = raw.note;
+	}
+	return out;
 }
 
 export function parseSideCloseInput(raw: unknown): SideCloseInput {
@@ -234,11 +244,12 @@ function passageLine(passage: string | undefined): string[] {
 /** The side agent's user message, rebuilt for every answer (stateless). */
 export function sideUserMessage(
 	transcript: string,
-	input: Pick<SideQuestionInput, "thread" | "question" | "passage">,
+	input: Pick<SideQuestionInput, "thread" | "question" | "passage" | "note">,
 ): string {
 	const parts = [`<tutor_transcript>\n${transcript}\n</tutor_transcript>`];
 	if (input.thread.length) {
 		const pairs = input.thread.map((p) => [...passageLine(p.passage), `Learner: ${p.question}`, `You: ${p.answer}`].join("\n"));
+		if (input.note) pairs.push(`Your last note: ${input.note}`);
 		parts.push(`<side_thread>\n${pairs.join("\n\n")}\n</side_thread>`);
 	}
 	parts.push([...passageLine(input.passage), `Learner: ${input.question}`].join("\n"));

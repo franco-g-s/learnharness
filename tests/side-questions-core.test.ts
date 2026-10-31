@@ -38,13 +38,14 @@ describe("parseSideQuestionInput", () => {
 	it("accepts a minimal body and keeps the optional passage", () => {
 		assert.deepEqual(parseSideQuestionInput(ok), ok);
 		assert.deepEqual(parseSideQuestionInput({ ...ok, passage: "p", sourceMessageId: "m1" }), { ...ok, passage: "p", sourceMessageId: "m1" });
+		assert.deepEqual(parseSideQuestionInput({ ...ok, note: "last note" }), { ...ok, note: "last note" });
 	});
 	it("rejects bad shapes and the caps with ChatInputError", () => {
 		const bad: unknown[] = [
 			null, "x", {}, { ...ok, threadId: "" }, { ...ok, threadId: "x".repeat(129) }, { ...ok, question: "  " },
 			{ ...ok, question: "q".repeat(SIDE_QUESTION_MAX_CHARS + 1) },
 			{ ...ok, passage: "p".repeat(SIDE_PASSAGE_MAX_CHARS + 1) },
-			{ ...ok, thread: "no" }, { ...ok, thread: [{ question: "q" }] },
+			{ ...ok, thread: "no" }, { ...ok, thread: [{ question: "q" }] }, { ...ok, note: 3 }, { ...ok, note: "n".repeat(2_601) },
 			{ ...ok, thread: Array.from({ length: SIDE_THREAD_MAX_PAIRS }, () => ({ question: "q", answer: "a" })) },
 		];
 		for (const body of bad) assert.throws(() => parseSideQuestionInput(body), ChatInputError, JSON.stringify(body)?.slice(0, 80));
@@ -160,12 +161,14 @@ describe("sideUserMessage", () => {
 			thread: [{ question: "What is f'?", answer: "The derivative.", passage: "f' = 2x" }, { question: "And f''?", answer: "2." }],
 			question: "Why multiply?",
 			passage: "the derivatives multiply",
+			note: "Already clarified: f' and f''.",
 		});
 		assert.equal(msg, [
 			"<tutor_transcript>", "[LEARNER] hi", "</tutor_transcript>", "",
 			"<side_thread>",
 			'Passage: "f\' = 2x"', "Learner: What is f'?", "You: The derivative.", "",
-			"Learner: And f''?", "You: 2.",
+			"Learner: And f''?", "You: 2.", "",
+			"Your last note: Already clarified: f' and f''.",
 			"</side_thread>", "",
 			'Passage: "the derivatives multiply"', "Learner: Why multiply?",
 		].join("\n"));
