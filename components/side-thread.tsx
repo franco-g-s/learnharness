@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { MessageCirclePlus, MessageCircleQuestion, PanelRightOpen, TextQuote, X } from "lucide-react";
 import { SIDE_PASSAGE_MAX_CHARS, SIDE_THREAD_MAX_PAIRS } from "@/src/core";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
-import { Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MenuShell } from "./menu-shell";
@@ -55,6 +54,59 @@ export interface SideThreadHandlers {
 	onSetTell: (tell: boolean) => void;
 	onExpand: () => void;
 	onClose: () => void;
+	/** A closed thread reopened read-only and kept private: tell the tutor now. */
+	onTellTutor?: () => void;
+}
+
+/** What happens to the note, and the one action that changes it. */
+export function noteStatus(state: SideThreadState): { text: string; action?: { label: string; tell: boolean } } {
+	const tell = displayedTell(state);
+	if (state.readOnly) return tell ? { text: "Told the tutor" } : { text: "Kept private", action: { label: "Tell tutor", tell: true } };
+	return tell
+		? { text: "Sent to the tutor when you close", action: { label: "Don't send", tell: false } }
+		: { text: "Kept private", action: { label: "Send to tutor", tell: true } };
+}
+
+/** Roughly two lines of the note at the popover's width, before layout
+ *  can measure (static renders, the first paint). */
+const NOTE_CLAMP_GUESS_CHARS = 110;
+
+function SideNoteBlock({ state, onSetTell, onTellTutor }: { state: SideThreadState; onSetTell: (tell: boolean) => void; onTellTutor?: () => void }) {
+	const note = state.pairs[state.pairs.length - 1]!.note;
+	const [expanded, setExpanded] = useState(false);
+	const [overflows, setOverflows] = useState(note.length > NOTE_CLAMP_GUESS_CHARS);
+	const textRef = useRef<HTMLParagraphElement>(null);
+	useLayoutEffect(() => {
+		const el = textRef.current;
+		if (el && !expanded) setOverflows(el.scrollHeight > el.clientHeight + 1);
+	}, [note, expanded, state.mode]);
+	const status = noteStatus(state);
+	const act = () => {
+		if (!status.action) return;
+		if (state.readOnly) onTellTutor?.();
+		else onSetTell(status.action.tell);
+	};
+	return (
+		<div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/40 px-2.5 py-2" data-testid="side-note">
+			<p ref={textRef} className={`font-prose text-xs text-muted-foreground ${expanded ? "" : "line-clamp-2"}`}>{note}</p>
+			{(overflows || expanded) && (
+				<button type="button" className="self-start font-ui text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => setExpanded(!expanded)}>
+					{expanded ? "Show less" : "Show more"}
+				</button>
+			)}
+			<div className="flex items-center gap-1.5 font-ui text-xs" data-testid="side-note-status">
+				<span className="text-foreground">{status.text}</span>
+				{status.action && (state.readOnly ? onTellTutor : true) && (
+					<>
+						<span aria-hidden="true" className="text-muted-foreground">·</span>
+						<button type="button" className="cursor-pointer text-foreground underline underline-offset-2 hover:text-primary" onClick={act}>
+							{status.action.label}
+						</button>
+					</>
+				)}
+			</div>
+		</div>
+	);
 }
 
 function Passage({ text }: { text: string }) {
@@ -67,7 +119,7 @@ function Passage({ text }: { text: string }) {
 
 /** The thread itself: header, Q&A pairs, the note with its toggle, the
  *  follow-up input. Shared by the popover and the panel. */
-export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose }: { state: SideThreadState } & SideThreadHandlers) {
+export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose, onTellTutor }: { state: SideThreadState } & SideThreadHandlers) {
 	const [question, setQuestion] = useState(state.failed?.question ?? "");
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const failedQuestion = state.failed?.question;
@@ -77,7 +129,7 @@ export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose }: {
 
 	const readOnly = state.readOnly !== undefined;
 	const full = state.pairs.length >= SIDE_THREAD_MAX_PAIRS;
-	const last = state.pairs[state.pairs.length - 1];
+	const hasNote = state.pairs.length > 0;
 	const submit = () => {
 		if (!question.trim() || state.draft || full) return;
 		onAsk(question);
@@ -125,15 +177,7 @@ export function SideThreadBody({ state, onAsk, onSetTell, onExpand, onClose }: {
 				{state.failed && <p role="alert" className="text-sm text-destructive">{state.failed.error}</p>}
 			</div>
 
-			{last && (
-				<div className="flex items-start gap-3 rounded-md border border-border bg-muted/40 px-2.5 py-2" data-testid="side-note">
-					<p className="flex-1 font-prose text-xs text-muted-foreground">{last.note}</p>
-					<label className="flex shrink-0 items-center gap-1.5 font-ui text-xs text-foreground">
-						Tell tutor
-						<Toggle label="Tell tutor" checked={displayedTell(state)} disabled={readOnly} onChange={onSetTell} />
-					</label>
-				</div>
-			)}
+			{hasNote && <SideNoteBlock state={state} onSetTell={onSetTell} onTellTutor={onTellTutor} />}
 
 			{!readOnly && (
 				<div className="flex flex-col gap-1.5 font-prose">

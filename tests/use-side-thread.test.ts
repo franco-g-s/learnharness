@@ -58,10 +58,18 @@ describe("sideThreadReducer", () => {
 
 	it("a read-only thread ignores asks and the toggle", () => {
 		const details = { thread: [{ question: "q", answer: "a" }], note: "n", toldTutor: true };
-		const s = run({ type: "open-read-only", details, anchor: { kind: "composer" } })!;
+		const s = run({ type: "open-read-only", threadId: "side_9", details, anchor: { kind: "composer" } })!;
 		assert.equal(sideThreadReducer(s, { type: "ask", question: "more" }), s);
 		assert.equal(sideThreadReducer(s, { type: "set-tell", tell: false }), s);
 		assert.equal(displayedTell(s), true);
+	});
+
+	it("marks a reopened private thread as told", () => {
+		const details = { thread: [{ question: "q", answer: "a" }], note: "n", toldTutor: false };
+		const s = run({ type: "open-read-only", threadId: "side_9", details, anchor: { kind: "composer" } })!;
+		assert.equal(displayedTell(s), false);
+		assert.equal(displayedTell(sideThreadReducer(s, { type: "told", threadId: "side_9" })!), true);
+		assert.equal(sideThreadReducer(s, { type: "told", threadId: "other" }), s);
 	});
 
 	it("expands into the panel and closes to nothing", () => {

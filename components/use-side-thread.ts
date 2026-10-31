@@ -49,7 +49,8 @@ export interface SideThreadState {
 
 export type SideThreadAction =
 	| { type: "open"; threadId: string; anchor: SideThreadAnchor; passage?: { text: string; sourceMessageId: string } }
-	| { type: "open-read-only"; details: SideQuestionDetails; anchor: SideThreadAnchor }
+	| { type: "open-read-only"; threadId: string; details: SideQuestionDetails; anchor: SideThreadAnchor }
+	| { type: "told"; threadId: string }
 	| { type: "add-passage"; passage: { text: string; sourceMessageId: string } }
 	| { type: "ask"; question: string }
 	| { type: "text"; delta: string }
@@ -70,12 +71,16 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 	if (action.type === "open-read-only") {
 		const { details } = action;
 		return {
-			threadId: "", draft: null, learnerTell: details.toldTutor, mode: "popover", anchor: action.anchor, readOnly: details,
+			threadId: action.threadId, draft: null, learnerTell: details.toldTutor, mode: "popover", anchor: action.anchor, readOnly: details,
 			pairs: details.thread.map((pair) => ({ ...pair, tell: details.toldTutor, note: details.note })),
 		};
 	}
 	if (!state) return null;
 	switch (action.type) {
+		case "told":
+			return state.readOnly && state.threadId === action.threadId
+				? { ...state, learnerTell: true, readOnly: { ...state.readOnly, toldTutor: true } }
+				: state;
 		case "close":
 			return null;
 		case "expand":
@@ -247,15 +252,26 @@ export function useSideThread(chatId: string) {
 		if (args.question?.trim()) ask(args.question);
 	}, [apply, ask, close]);
 
-	const reopenReadOnly = useCallback((details: SideQuestionDetails, anchor: SideThreadAnchor) => {
+	const reopenReadOnly = useCallback((threadId: string, details: SideQuestionDetails, anchor: SideThreadAnchor) => {
 		close();
-		const action: SideThreadAction = { type: "open-read-only", details, anchor };
+		const action: SideThreadAction = { type: "open-read-only", threadId, details, anchor };
 		apply(action);
 	}, [apply, close]);
 
 	const addPassage = useCallback((passage: { text: string; sourceMessageId: string }) => apply({ type: "add-passage", passage }), [apply]);
 	const setTell = useCallback((tell: boolean) => apply({ type: "set-tell", tell }), [apply]);
 	const expand = useCallback(() => apply({ type: "expand" }), [apply]);
+	/** "Tell tutor" on a closed thread (its chip or its read-only reopen). */
+	const tellTutor = useCallback(async (threadId: string): Promise<boolean> => {
+		const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/side-question/tell`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ threadId }),
+		}).catch(() => null);
+		if (!res?.ok) return false;
+		apply({ type: "told", threadId });
+		return true;
+	}, [apply, chatId]);
 
 	// F6: leaving the chat or hiding the page commits the open thread.
 	useEffect(() => {
@@ -266,5 +282,5 @@ export function useSideThread(chatId: string) {
 		};
 	}, [close]);
 
-	return { state, open, ask, addPassage, setTell, expand, close, reopenReadOnly };
+	return { state, open, ask, addPassage, setTell, expand, close, reopenReadOnly, tellTutor };
 }

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
-import { parseBtw, SideThreadBody, sideThreadPlaceholder, createSideQuestionActions } from "../components/side-thread.tsx";
+import { noteStatus, parseBtw, SideThreadBody, sideThreadPlaceholder, createSideQuestionActions } from "../components/side-thread.tsx";
 import type { SideThreadState } from "../components/use-side-thread.ts";
 
 const noop = () => {};
@@ -28,30 +28,37 @@ describe("parseBtw", () => {
 });
 
 describe("SideThreadBody", () => {
-	it("shows the header, the pair, the note and the toggle at the recommendation", () => {
+	it("shows the header, the pair, the note and what happens to it", () => {
 		const document = documentFor(answered);
 		assert.match(document.body.textContent!, /Side question/);
 		assert.match(document.body.textContent!, /Why multiply\?/);
 		assert.match(document.body.textContent!, /the derivatives multiply/);
 		assert.match(document.body.textContent!, /Already clarified: chain rule\./);
-		const toggle = document.querySelector('[role="switch"]')!;
-		assert.equal(toggle.getAttribute("aria-checked"), "true");
-		assert.equal(toggle.hasAttribute("disabled"), false);
-		assert.deepEqual([...document.querySelectorAll("button[aria-label]")].map((b) => b.getAttribute("aria-label")).filter((l) => l !== "Tell tutor"), ["Expand", "Close"]);
+		assert.equal(document.querySelector('[data-testid="side-note-status"]')!.textContent, "Sent to the tutor when you close·Don't send");
+		assert.equal(document.querySelector('[role="switch"]'), null);
+		assert.deepEqual([...document.querySelectorAll("button[aria-label]")].map((b) => b.getAttribute("aria-label")), ["Expand", "Close"]);
 	});
 
-	it("follows the learner's toggle and hides Expand in the panel", () => {
+	it("follows the learner's choice and hides Expand in the panel", () => {
 		const document = documentFor({ ...answered, learnerTell: false, mode: "panel" });
-		assert.equal(document.querySelector('[role="switch"]')!.getAttribute("aria-checked"), "false");
+		assert.equal(document.querySelector('[data-testid="side-note-status"]')!.textContent, "Kept private·Send to tutor");
 		assert.equal(document.querySelector('button[aria-label="Expand"]'), null);
 	});
 
-	it("locks the toggle and drops the input when reopened read-only", () => {
-		const document = documentFor({ ...answered, readOnly: { thread: [{ question: "Why multiply?", answer: "x" }], note: "n", toldTutor: false } });
-		const toggle = document.querySelector('[role="switch"]')!;
-		assert.equal(toggle.hasAttribute("disabled"), true);
-		assert.equal(toggle.getAttribute("aria-checked"), "false");
+	it("clamps a long note to two lines with Show more", () => {
+		const long = { ...answered, pairs: [{ ...answered.pairs[0]!, note: "word ".repeat(60) }] };
+		const document = documentFor(long);
+		assert.match(document.querySelector('[data-testid="side-note"] p')!.getAttribute("class")!, /line-clamp-2/);
+		assert.ok([...document.querySelectorAll("button")].some((b) => b.textContent === "Show more"));
+		assert.ok(![...documentFor(answered).querySelectorAll("button")].some((b) => b.textContent === "Show more"), "a short note has no link");
+	});
+
+	it("reopened read-only: no input; a private thread can still be told", () => {
+		const readOnly = { ...answered, readOnly: { thread: [{ question: "Why multiply?", answer: "x" }], note: "n", toldTutor: false } };
+		const document = parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={readOnly} {...handlers} onTellTutor={noop} />)}</body></html>`).document;
 		assert.equal(document.querySelector('[data-testid="side-thread-input"]'), null);
+		assert.equal(document.querySelector('[data-testid="side-note-status"]')!.textContent, "Kept private·Tell tutor");
+		assert.deepEqual(noteStatus({ ...readOnly, readOnly: { ...readOnly.readOnly, toldTutor: true } }), { text: "Told the tutor" });
 	});
 
 	it("shows the answer streaming in", () => {

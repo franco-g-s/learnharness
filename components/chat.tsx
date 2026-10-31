@@ -1516,7 +1516,8 @@ export function Chat({
 													<SideQuestionChip
 														key={pi}
 														details={part.data as SideQuestionDetails}
-														onOpen={(element) => sideThread.reopenReadOnly(part.data as SideQuestionDetails, { kind: "element", element })}
+														onOpen={(element) => sideThread.reopenReadOnly(m.id, part.data as SideQuestionDetails, { kind: "element", element })}
+														onTell={() => sideThread.tellTutor(m.id)}
 													/>
 												);
 											case "data-practice-next":
@@ -1855,6 +1856,7 @@ export function Chat({
 							onSetTell={sideThread.setTell}
 							onExpand={sideThread.expand}
 							onClose={sideThread.close}
+							onTellTutor={sideThread.state.readOnly ? () => void sideThread.tellTutor(sideThread.state!.threadId) : undefined}
 						/>
 					</SideThreadPanel>
 				)}
@@ -1883,6 +1885,7 @@ export function Chat({
 						onSetTell={sideThread.setTell}
 						onExpand={sideThread.expand}
 						onClose={sideThread.close}
+						onTellTutor={sideThread.state.readOnly ? () => void sideThread.tellTutor(sideThread.state!.threadId) : undefined}
 					/>
 				)}
 				{citationEdit && (
