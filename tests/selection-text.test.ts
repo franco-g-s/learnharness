@@ -30,6 +30,11 @@ describe("readSourceText", () => {
 		assert.equal(chunks.filter((c) => c.atomic).length, 2);
 	});
 
+	it("ignores whitespace-only text between block elements", () => {
+		const v = viewport(`<div data-source-message-id="m"><ol>\n<li>one</li>\n<li>two</li>\n</ol>\n<p>three</p></div>`);
+		assert.equal(readSourceText(sourceElements(v, "m")).text, "one\ntwo\nthree");
+	});
+
 	it("skips formulas without a TeX annotation", () => {
 		const v = viewport(`<div data-source-message-id="m"><p>a <span class="katex"><span>?</span></span> b</p></div>`);
 		assert.equal(readSourceText(sourceElements(v, "m")).text, "a  b");

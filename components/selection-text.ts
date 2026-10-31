@@ -32,6 +32,13 @@ function isBlock(element: Element): boolean {
 	return BLOCKS.has(element.tagName) || element.classList.contains("katex-display");
 }
 
+function besideBlock(node: Node): boolean {
+	const parent = node.parentElement;
+	if (parent && /^(OL|UL|DL|TABLE|THEAD|TBODY|TFOOT|TR)$/.test(parent.tagName)) return true;
+	const neighbours = [node.previousSibling, node.nextSibling];
+	return neighbours.some((sibling) => sibling?.nodeType === 1 && isBlock(sibling as Element));
+}
+
 export function sourceElements(viewport: ParentNode, messageId: string): Element[] {
 	return Array.from(viewport.querySelectorAll(`[${SOURCE_ATTRIBUTE}]`)).filter((element) => element.getAttribute(SOURCE_ATTRIBUTE) === messageId);
 }
@@ -49,7 +56,13 @@ export function readSourceText(sources: readonly Element[]): { text: string; chu
 		text += value;
 	};
 	const walk = (node: Node) => {
-		if (node.nodeType === 3) { add(node, (node as Text).data); return; }
+		if (node.nodeType === 3) {
+			// Markup indentation between blocks (e.g. "\n" between <li>s) is
+			// not text the learner sees; the block boundary already counts.
+			if (!/\S/.test((node as Text).data) && besideBlock(node)) return;
+			add(node, (node as Text).data);
+			return;
+		}
 		if (node.nodeType !== 1) return;
 		const element = node as Element;
 		if (isFormula(element)) {
