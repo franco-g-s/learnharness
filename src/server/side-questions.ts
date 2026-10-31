@@ -26,9 +26,13 @@ import { ChatInputError } from "../core/input-events.ts";
 import { modelsNotConfigured, providerKeyMissing } from "../core/settings.ts";
 import { resolveSideQuestionSpec, type EffectiveModelSpec } from "../core/settings-resolution.ts";
 import {
+	finalTell,
+	newSideQuestionMarker,
+	parseSideCloseInput,
 	parseSideQuestionInput,
 	sideTranscript,
 	sideUserMessage,
+	type SideCloseInput,
 	type SideNote,
 	type SidePair,
 	type SideQuestionInput,
@@ -265,4 +269,62 @@ export function flushParkedSideQuestions(chatStore: ChatStore, chatId: string): 
 		throw err;
 	}
 	emit("record-changed", { chatId });
+}
+
+// ─── the close route (Task 6) ────────────────────────────────────────────────
+
+/** Threads whose close is waiting for a late answer (a repeat is a no-op). */
+function closing(): Set<string> {
+	const g = globalThis as typeof globalThis & { __lhClosingSideThreads?: Set<string> };
+	return (g.__lhClosingSideThreads ??= new Set());
+}
+
+/** Build and commit the marker; null when nothing was answered. */
+function commitThread(chatId: string, input: SideCloseInput, pairs: SideAnswerPair[]): "committed" | "parked" | null {
+	if (!pairs.length) return null;
+	const thread = pairs.map(({ tell: _tell, note: _note, ...pair }) => pair);
+	const marker = newSideQuestionMarker(input.threadId, {
+		thread,
+		note: pairs[pairs.length - 1]!.note,
+		toldTutor: finalTell(pairs, input.learnerTell),
+	});
+	return commitSideQuestion(stores.chatStore, chatId, marker);
+}
+
+/**
+ * POST /api/chats/[id]/side-question/close — commit a closed thread: 200
+ * committed, 202 parked (or waiting for an answer still streaming, F9),
+ * 204 nothing to save. Idempotent per thread id.
+ */
+export async function handleSideClose(chatId: string, body: unknown): Promise<Response> {
+	if (!stores.chatStore.getChat(chatId)) return Response.json({ error: "Unknown chat" }, { status: 404 });
+	let input: SideCloseInput;
+	try { input = parseSideCloseInput(body); }
+	catch (err) {
+		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+		throw err;
+	}
+	const key = `${chatId}\u0000${input.threadId}`;
+	if (closing().has(key) || sideQuestionKnown(stores.chatStore, chatId, input.threadId)) return Response.json({ ok: true });
+	await awaitCompaction(chatId);
+
+	const entry = input.pending ? inFlightSideAnswer(input.threadId) : undefined;
+	if (entry && entry.question === input.pending!.question) {
+		closing().add(key);
+		void entry.answer
+			.then(async (late) => {
+				forgetSideAnswer(input.threadId, entry);
+				await awaitCompaction(chatId);
+				if (!stores.chatStore.getChat(chatId) || sideQuestionKnown(stores.chatStore, chatId, input.threadId)) return;
+				commitThread(chatId, input, late ? [...input.thread, late] : input.thread);
+			})
+			.catch((err) => console.error(`[chat ${chatId}] side thread failed to save:`, err))
+			.finally(() => closing().delete(key));
+		return Response.json({ ok: true, waiting: true }, { status: 202 });
+	}
+
+	// An unanswered question with no run behind it is dropped.
+	const outcome = commitThread(chatId, input, input.thread);
+	if (outcome === null) return new Response(null, { status: 204 });
+	return outcome === "parked" ? Response.json({ ok: true, parked: true }, { status: 202 }) : Response.json({ ok: true });
 }
