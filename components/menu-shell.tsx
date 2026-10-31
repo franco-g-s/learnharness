@@ -164,7 +164,7 @@ export function MenuShell({
 		focusedOnceRef.current = true;
 		const el = menuRef.current;
 		if (!el) return;
-		const input = el.querySelector<HTMLElement>("input");
+		const input = el.querySelector<HTMLElement>("input, textarea");
 		(input ?? el).focus();
 	}, [placed]);
 
