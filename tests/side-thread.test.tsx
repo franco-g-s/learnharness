@@ -54,10 +54,10 @@ describe("SideThreadBody", () => {
 		assert.ok(![...documentFor(answered).querySelectorAll("button")].some((b) => b.textContent === "Show more"), "a short note has no link");
 	});
 
-	it("reopened read-only: no input; a private thread can still be told", () => {
+	it("reopened read-only: you can ask a follow-up, and a private thread can still be told", () => {
 		const readOnly = { ...answered, readOnly: { thread: [{ question: "Why multiply?", answer: "x" }], note: "n", toldTutor: false } };
 		const document = parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={readOnly} {...handlers} onTellTutor={noop} />)}</body></html>`).document;
-		assert.equal(document.querySelector('[data-testid="side-thread-input"]'), null);
+		assert.equal(document.querySelector('[data-testid="side-thread-input"]')!.getAttribute("placeholder"), "Ask a follow-up…");
 		assert.equal(document.querySelector('[data-testid="side-note-status"]')!.textContent, "Kept private·Tell tutor");
 		assert.deepEqual(noteStatus({ ...readOnly, readOnly: { ...readOnly.readOnly, toldTutor: true } }), { text: "Told the tutor" });
 	});

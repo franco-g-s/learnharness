@@ -77,6 +77,13 @@ describe("POST /api/chats/[id]/side-question/close", () => {
 		assert.equal(chatStore.getChat(id)!.messages.filter((m) => m.id === "side_late").length, 1);
 	});
 
+	it("records which thread a continuation continues", async () => {
+		const id = chat();
+		await handleSideClose(id, { threadId: "side_cont", thread: [pair("a?", false), pair("b?", true)], learnerTell: null, continues: "side_orig" });
+		assert.equal((markerOf(id, "side_cont")!.details as { continues?: string }).continues, "side_orig");
+		assert.equal((await handleSideClose(id, { threadId: "side_bad", thread: [pair("a?", false)], learnerTell: null, continues: 3 })).status, 400);
+	});
+
 	it("is a no-op for a thread already saved", async () => {
 		const id = chat();
 		await handleSideClose(id, { threadId: "side_dup", thread: [pair("a?", true)], learnerTell: null });

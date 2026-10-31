@@ -54,12 +54,15 @@ export interface SideThreadState {
 	failed?: { question: string; error: string };
 	/** A closed thread reopened from its chip. */
 	readOnly?: SideQuestionDetails;
+	/** A reopened thread the learner asked more in: the thread it continues. */
+	continues?: string;
 }
 
 export type SideThreadAction =
 	| { type: "open"; threadId: string; anchor: SideThreadAnchor; passage?: SidePassage }
 	| { type: "open-read-only"; threadId: string; details: SideQuestionDetails; anchor: SideThreadAnchor }
 	| { type: "told"; threadId: string }
+	| { type: "continue"; threadId: string }
 	| { type: "add-passage"; passage: SidePassage }
 	| { type: "ask"; question: string }
 	| { type: "text"; delta: string }
@@ -86,6 +89,13 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 	}
 	if (!state) return null;
 	switch (action.type) {
+		case "continue": {
+			// A follow-up in a reopened thread: it lives again under a new id
+			// and, on close, saves the whole thread in place of the old chip.
+			if (!state.readOnly) return state;
+			const { readOnly: _readOnly, ...rest } = state;
+			return { ...rest, threadId: action.threadId, continues: state.threadId, learnerTell: null };
+		}
 		case "told":
 			return state.readOnly && state.threadId === action.threadId
 				? { ...state, learnerTell: true, readOnly: { ...state.readOnly, toldTutor: true } }
@@ -153,6 +163,7 @@ export function sideCloseBody(state: SideThreadState) {
 		threadId: state.threadId,
 		thread: state.pairs,
 		learnerTell: state.learnerTell,
+		...(state.continues ? { continues: state.continues } : {}),
 		...(state.draft ? {
 			pending: {
 				question: state.draft.question,
@@ -213,6 +224,7 @@ export function useSideThread(chatId: string) {
 	}, [apply, chatId, stopReading]);
 
 	const ask = useCallback((question: string) => {
+		if (stateRef.current?.readOnly && question.trim()) apply({ type: "continue", threadId: newThreadId() });
 		const current = stateRef.current;
 		if (!current) return;
 		apply({ type: "ask", question });

@@ -290,6 +290,7 @@ function commitThread(chatId: string, input: SideCloseInput, pairs: SideAnswerPa
 		thread,
 		note: pairs[pairs.length - 1]!.note,
 		toldTutor: finalTell(pairs, input.learnerTell),
+		...(input.continues !== undefined ? { continues: input.continues } : {}),
 	});
 	return commitSideQuestion(stores.chatStore, chatId, marker);
 }

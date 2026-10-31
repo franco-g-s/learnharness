@@ -154,7 +154,6 @@ export function SideThreadBody({ state, chatId, onAsk, onSetTell, onExpand, onCl
 	// The input stays focused through asking and expanding.
 	useEffect(() => { inputRef.current?.focus({ preventScroll: true }); }, [state.mode]);
 
-	const readOnly = state.readOnly !== undefined;
 	const full = state.pairs.length >= SIDE_THREAD_MAX_PAIRS;
 	const hasNote = state.pairs.length > 0;
 	const submit = () => {
@@ -211,35 +210,33 @@ export function SideThreadBody({ state, chatId, onAsk, onSetTell, onExpand, onCl
 
 			{hasNote && <SideNoteBlock state={state} onSetTell={onSetTell} onTellTutor={onTellTutor} />}
 
-			{!readOnly && (
-				<div className="flex flex-col gap-1.5 font-prose">
-					{state.pendingPassage && <Passage text={state.pendingPassage.text} chatId={chatId} sourceMessageId={state.pendingPassage.sourceMessageId} selector={state.pendingPassage.selector} />}
-					<Textarea
-						ref={inputRef}
-						aria-label="Side question"
-						data-testid="side-thread-input"
-						className="min-h-9 resize-none font-prose text-sm"
-						rows={1}
-						value={question}
-						disabled={full}
-						placeholder={sideThreadPlaceholder(state)}
-						onChange={(event) => setQuestion(event.target.value)}
-						onKeyDown={(event) => {
-							if (event.nativeEvent.isComposing) return;
-							if (event.key === "Enter" && !event.shiftKey) {
-								event.preventDefault();
-								event.stopPropagation();
-								submit();
-							} else if (event.key === "Escape") {
-								// F11: Esc closes the thread before anything else.
-								event.preventDefault();
-								event.stopPropagation();
-								onClose();
-							}
-						}}
-					/>
-				</div>
-			)}
+			<div className="flex flex-col gap-1.5 font-prose">
+				{state.pendingPassage && <Passage text={state.pendingPassage.text} chatId={chatId} sourceMessageId={state.pendingPassage.sourceMessageId} selector={state.pendingPassage.selector} />}
+				<Textarea
+					ref={inputRef}
+					aria-label="Side question"
+					data-testid="side-thread-input"
+					className="min-h-9 resize-none font-prose text-sm"
+					rows={1}
+					value={question}
+					disabled={full}
+					placeholder={sideThreadPlaceholder(state)}
+					onChange={(event) => setQuestion(event.target.value)}
+					onKeyDown={(event) => {
+						if (event.nativeEvent.isComposing) return;
+						if (event.key === "Enter" && !event.shiftKey) {
+							event.preventDefault();
+							event.stopPropagation();
+							submit();
+						} else if (event.key === "Escape") {
+							// F11: Esc closes the thread before anything else.
+							event.preventDefault();
+							event.stopPropagation();
+							onClose();
+						}
+					}}
+				/>
+			</div>
 		</div>
 	);
 }

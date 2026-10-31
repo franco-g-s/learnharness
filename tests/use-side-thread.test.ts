@@ -79,6 +79,20 @@ describe("sideThreadReducer", () => {
 		assert.equal(sideThreadReducer(s, { type: "told", threadId: "other" }), s);
 	});
 
+	it("continues a reopened thread under a new id, carrying the old pairs and note", () => {
+		const details = { thread: [{ question: "q", answer: "a" }], note: "old note", toldTutor: true };
+		const reopened = run({ type: "open-read-only", threadId: "side_9", details, anchor: { kind: "composer" } })!;
+		const s = sideThreadReducer(sideThreadReducer(reopened, { type: "continue", threadId: "side_10" }), { type: "ask", question: "more?" })!;
+		assert.equal(s.threadId, "side_10");
+		assert.equal(s.continues, "side_9");
+		assert.equal(s.readOnly, undefined);
+		assert.equal(s.learnerTell, null);
+		assert.deepEqual(s.pairs, [{ question: "q", answer: "a", tell: true, note: "old note" }]);
+		assert.equal(s.draft?.question, "more?");
+		assert.equal(sideCloseBody(s).continues, "side_9");
+		assert.equal(sideThreadReducer(s, { type: "continue", threadId: "x" }), s, "a live thread doesn't continue");
+	});
+
 	it("expands into the panel and closes to nothing", () => {
 		assert.equal(run(open, { type: "expand" })!.mode, "panel");
 		assert.equal(run(open, { type: "close" }), null);

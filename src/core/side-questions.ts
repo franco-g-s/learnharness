@@ -80,6 +80,8 @@ export interface SideCloseInput {
 	threadId: string;
 	thread: Array<SidePair & SideNote>;
 	learnerTell: boolean | null;
+	/** The closed thread this one continues (its chip gives way). */
+	continues?: string;
 	pending?: { question: string; passage?: string; sourceMessageId?: string; selector?: PassageSelector };
 }
 
@@ -88,6 +90,8 @@ export interface SideQuestionDetails {
 	thread: SidePair[];
 	note: string;
 	toldTutor: boolean;
+	/** A continuation's predecessor: the view hides that thread's chip. */
+	continues?: string;
 }
 
 // ─── the wire parsers ────────────────────────────────────────────────────────
@@ -181,6 +185,7 @@ export function parseSideCloseInput(raw: unknown): SideCloseInput {
 	const thread = threadOf(raw.thread, SIDE_THREAD_MAX_PAIRS).map((p, i) => ({ ...pairOf(p, i), ...noteOf(p as Record<string, unknown>, i) }));
 	if (raw.learnerTell !== null && typeof raw.learnerTell !== "boolean") throw new ChatInputError("learnerTell must be a boolean or null");
 	const out: SideCloseInput = { threadId, thread, learnerTell: raw.learnerTell };
+	if (raw.continues !== undefined) out.continues = threadIdOf(raw.continues);
 	if (raw.pending !== undefined) {
 		if (!isObject(raw.pending)) throw new ChatInputError("pending must be an object");
 		out.pending = { question: questionOf(raw.pending.question, "pending.question"), ...passageOf(raw.pending, "pending") };

@@ -137,11 +137,15 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 	}
 
 	// Threads told after they closed (#16): their chips show as told.
+	// …and threads a later one continues give way to it (one chip, at the
+	// conversation's latest point).
 	const toldLater = new Set<string>();
+	const continued = new Set<string>();
 	for (const message of messages) {
-		if (message.role === "custom" && message.customType === "side-question-told") {
-			toldLater.add((message.details as { threadId: string }).threadId);
-		}
+		if (message.role !== "custom") continue;
+		if (message.customType === "side-question-told") toldLater.add((message.details as { threadId: string }).threadId);
+		const continues = message.customType === "side-question" ? (message.details as { continues?: unknown }).continues : undefined;
+		if (typeof continues === "string") continued.add(continues);
 	}
 
 	const lastAssistant = (): LhViewMessage | undefined => {
@@ -200,7 +204,7 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		}
 
 		if (role === "custom") {
-			projectMarker(m as LhMarkerMessage, out, toldLater);
+			projectMarker(m as LhMarkerMessage, out, toldLater, continued);
 			continue;
 		}
 
@@ -383,7 +387,7 @@ function applyResultTo(part: LhViewPart | undefined, result: ToolResultMessage):
 }
 
 /** A marker's projected message (handoff/steers) or splice (plan block). */
-function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[], toldLater: ReadonlySet<string>): void {
+function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[], toldLater: ReadonlySet<string>, continued: ReadonlySet<string>): void {
 	switch (marker.customType) {
 		case "graph-context": {
 			// The session's map context (owner, 2026-10-04): user-side —
@@ -461,6 +465,7 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[], toldLater:
 			return;
 		}
 		case "side-question": {
+			if (continued.has(marker.id)) return; // a later thread continues it
 			// A closed side thread (#16): a compact chip at its position;
 			// clicking reopens the thread read-only. Told or not, the chip
 			// shows — the details carry the whole thread.

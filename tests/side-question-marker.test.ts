@@ -118,3 +118,12 @@ describe("telling the tutor later (side-question-told)", () => {
 		assert.deepEqual(view[1]!.parts, [{ type: "data-side-question", id: "sq_side_quiet", data: { ...details(false), toldTutor: true } }]);
 	});
 });
+
+describe("continuing a closed thread", () => {
+	it("hides the chip a continuation replaces, so the conversation shows once at its latest point", () => {
+		const continued = newSideQuestionMarker("side_next", { thread: [{ question: "Why?", answer: "Because." }, { question: "And?", answer: "So." }], note: "both", toldTutor: false, continues: "side_quiet" }) as LhMessage;
+		const view = projectView([newUserMessage("hi") as LhMessage, quiet(), newUserMessage("later") as LhMessage, continued]);
+		const chips = view.flatMap((m) => m.parts.filter((p) => p.type === "data-side-question").map((p) => (p as { id: string }).id));
+		assert.deepEqual(chips, ["sq_side_next"]);
+	});
+});
