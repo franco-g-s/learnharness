@@ -31,3 +31,13 @@ describe("CitationChip", () => {
 		assert.ok(document.querySelector('[data-testid="citation-chip"]'));
 	});
 });
+
+describe("CitationQuoteCard", () => {
+	it("shows the full quote, the comment and a Go to source button", async () => {
+		const { CitationQuoteCard } = await import("../components/citation-chip.tsx");
+		const document = documentFor(<CitationQuoteCard citation={{ ...citation, text: "line one\nline two", comment: "why?" }} onOpenSource={() => {}} />);
+		assert.equal(document.querySelector("blockquote")!.textContent, "line one\nline two");
+		assert.match(document.body.textContent!, /why\?/);
+		assert.equal(document.querySelector("button")!.textContent, "Go to source");
+	});
+});
