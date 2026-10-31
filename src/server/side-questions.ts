@@ -19,6 +19,9 @@ import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
 import { isSubscriptionProvider } from "../agent/subscription-connections.ts";
 import { runSideQuestion } from "../agent/subagents/side-question.ts";
 import type { CallUsage } from "../core/contracts.ts";
+import { emit } from "../core/events.ts";
+import { hasUnresolvedQuestion, type LhMarkerMessage, type LhMessage } from "../core/native-messages.ts";
+import type { ChatStore } from "../core/ports.ts";
 import { ChatInputError } from "../core/input-events.ts";
 import { modelsNotConfigured, providerKeyMissing } from "../core/settings.ts";
 import { resolveSideQuestionSpec, type EffectiveModelSpec } from "../core/settings-resolution.ts";
@@ -34,6 +37,7 @@ import { awaitCompaction } from "./compaction.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { refreshConnectionCatalog } from "./model-catalog.ts";
 import { stores } from "./stores.ts";
+import { isTurnRunning } from "./turn-liveness.ts";
 
 export type SideAnswerPair = SidePair & SideNote;
 
@@ -196,4 +200,69 @@ export async function handleSideQuestion(chatId: string, body: unknown, deps: Si
 		}),
 		{ headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" } },
 	);
+}
+
+// ─── commit, park and flush (Task 5) ─────────────────────────────────────────
+//
+// A closed thread's marker may not land while a turn runs (persistTurn
+// appends the turn's messages past the record it started from) or while a
+// tutor question waits (its answer must sit right after its call, F5). It
+// is PARKED instead — the dismissal-park discipline: a globalThis queue
+// per chat, order kept — and flushed at the next point the lesson can take
+// it: turn settle (success or failure), right after an answer or before a
+// text message (handleChatInput's write-ahead), and after a dismissal.
+
+function parked(): Map<string, LhMarkerMessage[]> {
+	const g = globalThis as typeof globalThis & { __lhParkedSideQuestions?: Map<string, LhMarkerMessage[]> };
+	return (g.__lhParkedSideQuestions ??= new Map());
+}
+
+/** Is this thread already saved or waiting to be? (A close is idempotent.) */
+export function sideQuestionKnown(chatStore: ChatStore, chatId: string, threadId: string): boolean {
+	if (parked().get(chatId)?.some((m) => m.id === threadId)) return true;
+	return chatStore.getChat(chatId)?.messages.some((m) => m.id === threadId) ?? false;
+}
+
+/** Append now when the lesson can take it, else park. */
+export function commitSideQuestion(chatStore: ChatStore, chatId: string, marker: LhMarkerMessage): "committed" | "parked" {
+	const queue = parked().get(chatId) ?? [];
+	const record = chatStore.getChat(chatId);
+	if (!record || isTurnRunning(chatId) || hasUnresolvedQuestion(record.messages)) {
+		parked().set(chatId, [...queue, marker]);
+		return "parked";
+	}
+	parked().delete(chatId);
+	chatStore.saveMessages(chatId, [...record.messages, ...queue, marker as LhMessage]);
+	emit("record-changed", { chatId });
+	return "committed";
+}
+
+/** Take the parked markers if they may follow `messagesAfter` (the record
+ *  as it will stand just before them); [] while a question would dangle. */
+export function takeFlushableSideQuestions(chatId: string, messagesAfter: readonly LhMessage[]): LhMessage[] {
+	const queue = parked().get(chatId);
+	if (!queue?.length || hasUnresolvedQuestion(messagesAfter)) return [];
+	parked().delete(chatId);
+	return queue as LhMessage[];
+}
+
+/** Put markers back at the front of the queue (their save failed). */
+export function restoreParkedSideQuestions(chatId: string, markers: readonly LhMessage[]): void {
+	if (!markers.length) return;
+	parked().set(chatId, [...(markers as LhMarkerMessage[]), ...(parked().get(chatId) ?? [])]);
+}
+
+/** The settle paths and the dismiss route: append whatever may land now. */
+export function flushParkedSideQuestions(chatStore: ChatStore, chatId: string): void {
+	const record = chatStore.getChat(chatId);
+	if (!record) return;
+	const markers = takeFlushableSideQuestions(chatId, record.messages);
+	if (!markers.length) return;
+	try {
+		chatStore.saveMessages(chatId, [...record.messages, ...markers]);
+	} catch (err) {
+		restoreParkedSideQuestions(chatId, markers);
+		throw err;
+	}
+	emit("record-changed", { chatId });
 }
