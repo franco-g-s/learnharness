@@ -452,6 +452,17 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 			});
 			return;
 		}
+		case "side-question": {
+			// A closed side thread (#16): a compact chip at its position;
+			// clicking reopens the thread read-only. Told or not, the chip
+			// shows — the details carry the whole thread.
+			out.push({
+				id: marker.id,
+				role: "user",
+				parts: [{ type: "data-side-question", id: `sq_${marker.id}`, data: marker.details }],
+			});
+			return;
+		}
 		case "problem-dismissed":
 			// UI-only (the ask-style dismissal): the synthesized conclude
 			// pair — which rides the NEXT input — carries the record's face.
